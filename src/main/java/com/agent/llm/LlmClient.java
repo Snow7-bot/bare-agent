@@ -1,12 +1,13 @@
 package com.agent.llm;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import okhttp3.*;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 public class LlmClient {
@@ -14,11 +15,10 @@ public class LlmClient {
     private final String apiKey;
     private final String apiUrl;
     private final String model;
-    private final OkHttpClient httpClient;
+    private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     public LlmClient() throws IOException {
-        // 1. 读取配置文件
         Properties props = new Properties();
         props.load(getClass().getClassLoader()
                 .getResourceAsStream("application.properties"));
@@ -27,46 +27,34 @@ public class LlmClient {
         this.apiUrl = props.getProperty("deepseek.api.url");
         this.model = props.getProperty("deepseek.model");
 
-        // 2. 初始化 HTTP 客户端
-        this.httpClient = new OkHttpClient();
+        this.httpClient = HttpClient.newHttpClient();
         this.objectMapper = new ObjectMapper();
     }
 
     /**
-     * 发送消息给 LLM，返回回复文本
+     * 发送多条消息，返回完整 ChatResponse（含 token 消耗）
      */
-    public String chat(String userMessage) throws IOException {
-        // 1. 构造请求体 JSON
-        String requestBody = objectMapper.writeValueAsString(
-                Map.of(
-                        "model", model,
-                        "messages", List.of(
-                                Map.of("role", "user", "content", userMessage)
-                        ),
-                        "temperature", 0.7
-                )
-        );
+    public ChatResponse chat(List<Message> messages) throws IOException, InterruptedException {
+        // 1. 构造 ChatRequest 对象
+        ChatRequest request = new ChatRequest(model, messages);
+        request.setTemperature(0.7);
 
-        // 2. 构造 HTTP 请求
-        Request request = new Request.Builder()
-                .url(apiUrl)
+        // 2. 序列化为 JSON
+        String requestBody = objectMapper.writeValueAsString(request);
+
+        // 3. 构造 HTTP 请求
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(apiUrl))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
-                .post(RequestBody.create(requestBody,
-                        MediaType.get("application/json; charset=utf-8")))
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
-        // 3. 发送请求，拿到响应
-        try (Response response = httpClient.newCall(request).execute()) {
-            String responseBody = response.body().string();
+        // 4. 发送请求
+        HttpResponse<String> response = httpClient.send(httpRequest,
+                HttpResponse.BodyHandlers.ofString());
 
-            // 4. 解析 JSON，提取回复内容
-            JsonNode root = objectMapper.readTree(responseBody);
-            return root.get("choices")
-                    .get(0)
-                    .get("message")
-                    .get("content")
-                    .asText();
-        }
+        // 5. 反序列化为 ChatResponse 对象
+        return objectMapper.readValue(response.body(), ChatResponse.class);
     }
 }
