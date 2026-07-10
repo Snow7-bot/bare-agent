@@ -36,5 +36,7 @@ build/
 .vscode/
 
 ### Mac OS ###
-.DS_Storesrc/main/resources/application.properties
+.DS_Store
+
+### Secrets ###
 src/main/resources/application.properties

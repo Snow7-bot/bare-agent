@@ -1,0 +1,7 @@
+# DeepSeek API 配置模板
+# 复制此文件为 application.properties 并填入你的 API Key
+# application.properties 已加入 .gitignore，不会被提交
+
+deepseek.api.key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+deepseek.api.url=https://api.deepseek.com/v1/chat/completions
+deepseek.model=deepseek-chat
