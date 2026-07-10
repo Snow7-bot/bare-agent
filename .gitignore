@@ -41,3 +41,4 @@ build/
 ### Secrets ###
 src/main/resources/application.properties
 src/main/resources/logs/
+src/main/resources/logs/
