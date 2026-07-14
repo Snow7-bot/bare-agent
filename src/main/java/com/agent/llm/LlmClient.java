@@ -32,12 +32,22 @@ public class LlmClient {
     }
 
     /**
-     * 发送多条消息，返回完整 ChatResponse（含 token 消耗）
+     * 不带工具的简单对话
      */
     public ChatResponse chat(List<Message> messages) throws IOException, InterruptedException {
-        // 1. 构造 ChatRequest 对象
+        return chatWithTools(messages, null);
+    }
+
+    /**
+     * 带工具列表的对话 — Day 4 Function Calling
+     */
+    public ChatResponse chatWithTools(List<Message> messages, List<ToolDefinition> tools) throws IOException, InterruptedException {
         ChatRequest request = new ChatRequest(model, messages);
         request.setTemperature(0.7);
+        request.setTools(tools);
+        if (tools != null && !tools.isEmpty()) {
+            request.setTools(tools);
+        }
 
         // 2. 序列化为 JSON
         String requestBody = objectMapper.writeValueAsString(request);

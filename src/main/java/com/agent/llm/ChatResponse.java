@@ -1,6 +1,7 @@
 package com.agent.llm;
-import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -9,10 +10,8 @@ public class ChatResponse {
     private List<Choice> choices;
     private Usage usage;
 
-
-    // 无参构造
     public ChatResponse() {}
-    // ========== Getter / Setter ==========
+
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
 
@@ -22,15 +21,39 @@ public class ChatResponse {
     public Usage getUsage() { return usage; }
     public void setUsage(Usage usage) { this.usage = usage; }
 
-    // 方便直接取第一条回复内容
+    // 普通回复文本
     public String getFirstContent() {
         if (choices != null && !choices.isEmpty()) {
-            return choices.get(0).getMessage().getContent();
+            Message msg = choices.get(0).getMessage();
+            if (msg != null) {
+                return msg.getContent();
+            }
         }
         return null;
     }
 
-    // ========== 内部类 ==========
+    // 判断是否有工具调用
+    public boolean hasToolCalls() {
+        if (choices != null && !choices.isEmpty()) {
+            Message msg = choices.get(0).getMessage();
+            return msg != null && msg.hasToolCalls();
+        }
+        return false;
+    }
+
+    // 获取工具调用列表
+    public List<ToolCall> getToolCalls() {
+        if (choices != null && !choices.isEmpty()) {
+            Message msg = choices.get(0).getMessage();
+            if (msg != null) {
+                return msg.getToolCalls();
+            }
+        }
+        return List.of();
+    }
+
+    // ====== 内部类 ======
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Choice {
         private Message message;
@@ -55,7 +78,6 @@ public class ChatResponse {
 
         public Usage() {}
 
-        // Getter / Setter 不变
         public int getPromptTokens() { return promptTokens; }
         public void setPromptTokens(int promptTokens) { this.promptTokens = promptTokens; }
 

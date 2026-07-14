@@ -11,27 +11,64 @@ import java.util.Map;
 import java.util.Scanner;
 
 public class Main {
-    // 日志文件路径
     private static final String LOG_FILE = "src/main/resources/logs/usage.log";
     private static int totalPromptTokens = 0;
     private static int totalCompletionTokens = 0;
     private static int roundCount = 0;
 
     public static void main(String[] args) throws Exception {
-
         System.out.println("正在连接 DeepSeek...");
         LlmClient client = new LlmClient();
         Scanner sc = new Scanner(System.in);
-        System.out.println("连接成功！");
 
-        // 初始化日志文件
+        // ---- Day 4: 创建工具箱并注册工具 ----
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(new ToolDefinition(
+                "get_current_time",
+                "获取当前系统时间（北京时间）",
+                Map.of("type", "object", "properties", Map.of())
+        ));
+        registry.register(new ToolDefinition(
+                "calculate",
+                "执行数学表达式计算，支持 + - * / 和括号",
+                Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "expression", Map.of(
+                                        "type", "string",
+                                        "description", "数学表达式，如 \"123 * 456\" 或 \"(1+2)*3\""
+                                )
+                        ),
+                        "required", List.of("expression")
+                )
+        ));
+        registry.register(new ToolDefinition(
+                "read_file",
+                "读取指定路径的文件内容（仅限文本文件）",
+                Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "path", Map.of(
+                                        "type", "string",
+                                        "description", "文件的绝对或相对路径"
+                                )
+                        ),
+                        "required", List.of("path")
+                )
+        ));
+        System.out.println("连接成功！已注册 " + registry.size() + " 个工具。");
+        System.out.println("试试问：\"现在几点了？\" 或 \"帮我算 123*456\"\n");
+
+        // 初始化日志
         initLog();
 
         // 对话历史
         List<Message> history = new ArrayList<>();
-        history.add(new Message("system", "你是一个有帮助的助手，用中文回答。"));
+        PromptTemplate agentPrompt = new PromptTemplate("prompts/agent_system.txt");
+        String systemPrompt = agentPrompt.getTemplate();
+        history.add(new Message("system", systemPrompt));
 
-        // 对话循环
+        // ====== 对话循环 ======
         while (true) {
             System.out.print("你: ");
             String userInput = sc.nextLine();
@@ -42,23 +79,53 @@ public class Main {
             }
 
             history.add(new Message("user", userInput));
-            ChatResponse response = client.chat(history);
+            ChatResponse response = client.chatWithTools(history, registry.getAllDefinitions());
+
+            // 判断：工具调用 还是 普通回复
+            if (response.hasToolCalls()) {
+                List<ToolCall> toolCalls = response.getToolCalls();
+
+                // 把 assistant 消息（含 tool_calls）写入历史
+                Message assistantMsg = response.getChoices().get(0).getMessage();
+                history.add(assistantMsg);
+
+                for (ToolCall tc : toolCalls) {
+                    String toolName = tc.getFunction().getName();
+                    String arguments = tc.getFunction().getArguments();
+                    System.out.println("\n🔧 LLM 请求调用工具：");
+                    System.out.println("   工具: " + toolName);
+                    System.out.println("   参数: " + arguments);
+                    System.out.println("  (Day 5 将实现工具实际执行)");
+
+                    // 把 tool 消息写入历史
+                    history.add(new Message("tool",
+                            "工具功能将在 Day 5 实现。请直接告诉用户你请求了什么工具。",
+                            tc.getId()));
+                }
+                continue;  // 跳回 while 顶部，等待用户下一轮输入
+            }
+
+            // 普通回复
             String reply = response.getFirstContent();
             history.add(new Message("assistant", reply));
 
             // 统计
             roundCount++;
-            int prompt = response.getUsage().getPromptTokens();
-            int completion = response.getUsage().getCompletionTokens();
+            int prompt = 0;
+            int completion = 0;
+            if (response.getUsage() != null) {
+                prompt = response.getUsage().getPromptTokens();
+                completion = response.getUsage().getCompletionTokens();
+            }
             totalPromptTokens += prompt;
             totalCompletionTokens += completion;
 
-            // 控制台输出
             System.out.println("DeepSeek: " + reply);
+            int totalTokens = response.getUsage() != null
+                    ? response.getUsage().getTotalTokens() : 0;
             System.out.println("  [输入: " + prompt + " | 输出: " + completion
-                    + " | 本轮: " + response.getUsage().getTotalTokens() + " tokens]");
+                    + " | 本轮: " + totalTokens + " tokens]");
 
-            // 写入日志
             writeLog(userInput, prompt, completion);
         }
 
@@ -74,7 +141,8 @@ public class Main {
         sc.close();
     }
 
-    // 初始化日志文件
+    // ========== 日志方法 ==========
+
     private static void initLog() throws IOException {
         try (PrintWriter pw = new PrintWriter(new FileWriter(LOG_FILE, true))) {
             pw.println("========== 新会话 "
@@ -83,15 +151,12 @@ public class Main {
         }
     }
 
-    // 写入一条日志
     private static void writeLog(String userInput, int promptTokens, int completionTokens) throws IOException {
         try (PrintWriter pw = new PrintWriter(new FileWriter(LOG_FILE, true))) {
             pw.printf("[%s] 用户: %s | 输入: %d | 输出: %d | 本轮: %d%n",
                     LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss")),
                     userInput.length() > 30 ? userInput.substring(0, 30) + "..." : userInput,
-                    promptTokens,
-                    completionTokens,
-                    promptTokens + completionTokens);
+                    promptTokens, completionTokens, promptTokens + completionTokens);
         }
     }
 }

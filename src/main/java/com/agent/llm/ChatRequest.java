@@ -8,7 +8,7 @@ public class ChatRequest {
     private String model;
     private List<Message> messages;
     private Double temperature;
-    private List<ToolDef> tools;
+    private List<ToolDefinition> tools;
 
     // 无参构造
     public ChatRequest() {}
@@ -30,6 +30,6 @@ public class ChatRequest {
     public Double getTemperature() { return temperature; }
     public void setTemperature(Double temperature) { this.temperature = temperature; }
 
-    public List<ToolDef> getTools() { return tools; }
-    public void setTools(List<ToolDef> tools) { this.tools = tools; }
+    public List<ToolDefinition> getTools() { return tools; }
+    public void setTools(List<ToolDefinition> tools) { this.tools = tools; }
 }
