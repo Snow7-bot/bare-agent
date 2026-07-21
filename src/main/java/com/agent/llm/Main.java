@@ -21,9 +21,8 @@ public class Main {
         LlmClient client = new LlmClient();
         Scanner sc = new Scanner(System.in);
 
-        // ---- Day 4: 创建工具箱并注册工具 ----
+        // ---- 创建工具箱并注册工具 ----
         ToolRegistry registry = new ToolRegistry();
-        ToolExecutor executor = new ToolExecutor();
         registry.register(new ToolDefinition(
                 "get_current_time",
                 "获取当前系统时间（北京时间）",
@@ -57,8 +56,13 @@ public class Main {
                         "required", List.of("path")
                 )
         ));
+
+        // 创建执行器和 ReAct 循环
+        ToolExecutor executor = new ToolExecutor();
+        ReActLoop reActLoop = new ReActLoop(client, registry, executor, 10);
+
         System.out.println("连接成功！已注册 " + registry.size() + " 个工具。");
-        System.out.println("试试问：\"现在几点了？\" 或 \"帮我算 123*456\"\n");
+        System.out.println("试试问：\"现在几点了？\" 或 \"先查当前时间，然后告诉我 2026 年元旦还有多少天\"\n");
 
         // 初始化日志
         initLog();
@@ -80,86 +84,23 @@ public class Main {
             }
 
             history.add(new Message("user", userInput));
-            ChatResponse response = client.chatWithTools(history, registry.getAllDefinitions());
 
-            // 判断：工具调用 还是 普通回复
-            if (response.hasToolCalls()) {
-                List<ToolCall> toolCalls = response.getToolCalls();
+            // 使用 ReAct 循环处理
+            String finalReply = reActLoop.run(history);
+            history.add(new Message("assistant", finalReply));
 
-                // 1. 把 assistant 消息（含 tool_calls）写入历史
-                Message assistantMsg = response.getChoices().get(0).getMessage();
-                history.add(assistantMsg);
-
-                // 2. 执行每个工具，把结果写入历史
-                for (ToolCall tc : toolCalls) {
-                    String toolName = tc.getFunction().getName();
-                    String arguments = tc.getFunction().getArguments();
-                    System.out.println("\n🔧 执行工具: " + toolName);
-                    System.out.println("   参数: " + arguments);
-
-                    // ★ 真正执行工具
-                    String result = executor.execute(toolName, arguments);
-                    System.out.println("   结果: " + result);
-
-                    // 3. 封装成 tool 消息，写入历史
-                    history.add(new Message("tool", result, tc.getId()));
-                }
-
-                // 4. 再次调用 LLM，让它基于工具结果生成最终回答
-                System.out.println("\n🤖 LLM 基于工具结果生成回答...");
-                ChatResponse finalResponse = client.chatWithTools(history, registry.getAllDefinitions());
-                String finalReply = finalResponse.getFirstContent();
-                history.add(new Message("assistant", finalReply));
-
-                System.out.println("DeepSeek: " + finalReply);
-
-                // 统计 token
-                roundCount++;
-                int prompt = 0, completion = 0;
-                if (finalResponse.getUsage() != null) {
-                    prompt = finalResponse.getUsage().getPromptTokens();
-                    completion = finalResponse.getUsage().getCompletionTokens();
-                }
-                totalPromptTokens += prompt;
-                totalCompletionTokens += completion;
-                int totalTokens = finalResponse.getUsage() != null ? finalResponse.getUsage().getTotalTokens() : 0;
-                System.out.println("  [输入: " + prompt + " | 输出: " + completion + " | 本轮: " + totalTokens + " tokens]");
-
-                writeLog(userInput, prompt, completion);
-                continue;
-            }
-
-            // 普通回复
-            String reply = response.getFirstContent();
-            history.add(new Message("assistant", reply));
+            System.out.println("DeepSeek: " + finalReply);
 
             // 统计
             roundCount++;
-            int prompt = 0;
-            int completion = 0;
-            if (response.getUsage() != null) {
-                prompt = response.getUsage().getPromptTokens();
-                completion = response.getUsage().getCompletionTokens();
-            }
-            totalPromptTokens += prompt;
-            totalCompletionTokens += completion;
-
-            System.out.println("DeepSeek: " + reply);
-            int totalTokens = response.getUsage() != null
-                    ? response.getUsage().getTotalTokens() : 0;
-            System.out.println("  [输入: " + prompt + " | 输出: " + completion
-                    + " | 本轮: " + totalTokens + " tokens]");
-
-            writeLog(userInput, prompt, completion);
+            System.out.println("  [ReAct 循环 " + reActLoop.getIterationCount()
+                    + " 轮，状态: " + reActLoop.getState() + "]");
         }
 
         // 打印汇总
         int total = totalPromptTokens + totalCompletionTokens;
         System.out.println("\n========== 会话汇总 ==========");
         System.out.println("总轮次: " + roundCount);
-        System.out.println("总输入: " + totalPromptTokens + " tokens");
-        System.out.println("总输出: " + totalCompletionTokens + " tokens");
-        System.out.println("总消耗: " + total + " tokens");
         System.out.println("日志已保存到: " + LOG_FILE);
 
         sc.close();
