@@ -23,6 +23,7 @@ public class Main {
 
         // ---- Day 4: 创建工具箱并注册工具 ----
         ToolRegistry registry = new ToolRegistry();
+        ToolExecutor executor = new ToolExecutor();
         registry.register(new ToolDefinition(
                 "get_current_time",
                 "获取当前系统时间（北京时间）",
@@ -85,24 +86,47 @@ public class Main {
             if (response.hasToolCalls()) {
                 List<ToolCall> toolCalls = response.getToolCalls();
 
-                // 把 assistant 消息（含 tool_calls）写入历史
+                // 1. 把 assistant 消息（含 tool_calls）写入历史
                 Message assistantMsg = response.getChoices().get(0).getMessage();
                 history.add(assistantMsg);
 
+                // 2. 执行每个工具，把结果写入历史
                 for (ToolCall tc : toolCalls) {
                     String toolName = tc.getFunction().getName();
                     String arguments = tc.getFunction().getArguments();
-                    System.out.println("\n🔧 LLM 请求调用工具：");
-                    System.out.println("   工具: " + toolName);
+                    System.out.println("\n🔧 执行工具: " + toolName);
                     System.out.println("   参数: " + arguments);
-                    System.out.println("  (Day 5 将实现工具实际执行)");
 
-                    // 把 tool 消息写入历史
-                    history.add(new Message("tool",
-                            "工具功能将在 Day 5 实现。请直接告诉用户你请求了什么工具。",
-                            tc.getId()));
+                    // ★ 真正执行工具
+                    String result = executor.execute(toolName, arguments);
+                    System.out.println("   结果: " + result);
+
+                    // 3. 封装成 tool 消息，写入历史
+                    history.add(new Message("tool", result, tc.getId()));
                 }
-                continue;  // 跳回 while 顶部，等待用户下一轮输入
+
+                // 4. 再次调用 LLM，让它基于工具结果生成最终回答
+                System.out.println("\n🤖 LLM 基于工具结果生成回答...");
+                ChatResponse finalResponse = client.chatWithTools(history, registry.getAllDefinitions());
+                String finalReply = finalResponse.getFirstContent();
+                history.add(new Message("assistant", finalReply));
+
+                System.out.println("DeepSeek: " + finalReply);
+
+                // 统计 token
+                roundCount++;
+                int prompt = 0, completion = 0;
+                if (finalResponse.getUsage() != null) {
+                    prompt = finalResponse.getUsage().getPromptTokens();
+                    completion = finalResponse.getUsage().getCompletionTokens();
+                }
+                totalPromptTokens += prompt;
+                totalCompletionTokens += completion;
+                int totalTokens = finalResponse.getUsage() != null ? finalResponse.getUsage().getTotalTokens() : 0;
+                System.out.println("  [输入: " + prompt + " | 输出: " + completion + " | 本轮: " + totalTokens + " tokens]");
+
+                writeLog(userInput, prompt, completion);
+                continue;
             }
 
             // 普通回复
