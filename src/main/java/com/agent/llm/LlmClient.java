@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.Properties;
 
@@ -17,6 +18,7 @@ public class LlmClient {
     private final String model;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final RetryPolicy retryPolicy;
 
     public LlmClient() throws IOException {
         Properties props = new Properties();
@@ -27,44 +29,93 @@ public class LlmClient {
         this.apiUrl = props.getProperty("deepseek.api.url");
         this.model = props.getProperty("deepseek.model");
 
-        this.httpClient = HttpClient.newHttpClient();
+        // 设置超时：连接10秒，读取60秒
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
+
         this.objectMapper = new ObjectMapper();
+        this.retryPolicy = new RetryPolicy(3, "src/main/resources/logs/retry.log");
     }
 
     /**
-     * 不带工具的简单对话
+     * 带工具列表的对话（含重试逻辑）
      */
-    public ChatResponse chat(List<Message> messages) throws IOException, InterruptedException {
-        return chatWithTools(messages, null);
+    public ChatResponse chatWithTools(List<Message> messages, List<ToolDefinition> tools)
+            throws LlmException, IOException {
+        retryPolicy.reset();
+
+        while (true) {
+            try {
+                return doChat(messages, tools);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new LlmException("请求被中断: " + e.getMessage());
+            } catch (IOException e) {
+                String msg = e.getMessage();
+                int statusCode = extractStatusCode(msg);
+
+                // 401 — 不重试，Key 有问题
+                if (statusCode == 401) {
+                    throw new LlmException("API Key 无效，请检查 application.properties", 401);
+                }
+
+                // 429 / 503 — 可重试
+                if (statusCode == 429 || statusCode == 503) {
+                    if (retryPolicy.canRetry()) {
+                        retryPolicy.waitAndLog(msg, statusCode);
+                        continue;
+                    }
+                    throw new LlmException("重试耗尽: " + msg, statusCode, retryPolicy.getRetryCount());
+                }
+
+                // 其他错误
+                throw new LlmException("LLM 调用失败: " + msg, statusCode);
+            }
+        }
     }
 
     /**
-     * 带工具列表的对话 — Day 4 Function Calling
+     * 真正发请求
      */
-    public ChatResponse chatWithTools(List<Message> messages, List<ToolDefinition> tools) throws IOException, InterruptedException {
+    private ChatResponse doChat(List<Message> messages, List<ToolDefinition> tools)
+            throws IOException, InterruptedException, LlmException {
+
         ChatRequest request = new ChatRequest(model, messages);
         request.setTemperature(0.7);
-        request.setTools(tools);
         if (tools != null && !tools.isEmpty()) {
             request.setTools(tools);
         }
 
-        // 2. 序列化为 JSON
         String requestBody = objectMapper.writeValueAsString(request);
 
-        // 3. 构造 HTTP 请求
         HttpRequest httpRequest = HttpRequest.newBuilder()
                 .uri(URI.create(apiUrl))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(60))
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
 
-        // 4. 发送请求
         HttpResponse<String> response = httpClient.send(httpRequest,
                 HttpResponse.BodyHandlers.ofString());
 
-        // 5. 反序列化为 ChatResponse 对象
+        int statusCode = response.statusCode();
+        if (statusCode != 200) {
+            throw new IOException("HTTP " + statusCode + ": " + response.body());
+        }
+
         return objectMapper.readValue(response.body(), ChatResponse.class);
+    }
+
+    /**
+     * 从异常消息中提取 HTTP 状态码
+     */
+    private int extractStatusCode(String msg) {
+        if (msg == null) return 0;
+        if (msg.contains("401")) return 401;
+        if (msg.contains("429")) return 429;
+        if (msg.contains("503")) return 503;
+        return 0;
     }
 }

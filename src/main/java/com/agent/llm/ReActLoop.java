@@ -24,14 +24,22 @@ public class ReActLoop {
     /**
      * 执行 ReAct 循环：思考 → 行动 → 观察 → 直到完成
      */
-    public String run(List<Message> history) throws IOException, InterruptedException {
+    public String run(List<Message> history) throws IOException, InterruptedException ,LlmException {
         state = AgentState.THINKING;
         iterationCount = 0;
 
         while (state != AgentState.FINISHED && iterationCount < maxIterations) {
             iterationCount++;
             System.out.println("\n--- 第 " + iterationCount + " 轮，状态: " + state + " ---");
-
+            // Token 超限保护：保留 system + 最近 20 条消息
+            if (history.size() > 22) {
+                Message systemMsg = history.get(0);
+                List<Message> recent = history.subList(history.size() - 20, history.size());
+                history.clear();
+                history.add(systemMsg);
+                history.addAll(recent);
+                System.out.println("⚠️ 历史过长，已裁剪（保留 system + 最近 20 条）");
+            }
             // 调用 LLM
             ChatResponse response = llmClient.chatWithTools(
                     history, toolRegistry.getAllDefinitions());

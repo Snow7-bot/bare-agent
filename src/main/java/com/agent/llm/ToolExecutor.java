@@ -1,6 +1,7 @@
 package com.agent.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,32 +9,30 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
-import javax.script.ScriptEngineManager;
-import javax.script.ScriptEngine;
 
 public class ToolExecutor {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 根据工具名和参数执行对应工具，返回结果字符串
+     * 入口：根据工具名路由到具体实现
      */
     public String execute(String toolName, String arguments) {
         try {
             Map<String, Object> args = objectMapper.readValue(arguments, Map.class);
             return switch (toolName) {
                 case "get_current_time" -> getCurrentTime();
-                case "calculate" -> calculate((String) args.get("expression"));
-                case "read_file" -> readFile((String) args.get("path"));
-                default -> "{\"error\": \"未知工具: " + toolName + "\"}";
+                case "calculate" -> calculate(args);
+                case "read_file" -> readFile(args);
+                default -> "{\"error\": \"未知工具: " + toolName
+                        + "，请检查可用工具列表后重试\"}";
             };
         } catch (Exception e) {
             return "{\"error\": \"工具执行失败: " + e.getMessage() + "\"}";
         }
     }
 
-    // ====== 3 个工具的真实实现 ======
-
+    // ====== 工具1：获取当前时间 ======
     private String getCurrentTime() {
         String now = Instant.now()
                 .atZone(ZoneId.of("Asia/Shanghai"))
@@ -41,28 +40,74 @@ public class ToolExecutor {
         return "{\"time\": \"" + now + "\"}";
     }
 
-    private String calculate(String expression) {
+    // ====== 工具2：计算器 ======
+    private String calculate(Map<String, Object> args) {
+        // 参数校验：缺少必填字段
+        if (!args.containsKey("expression") || args.get("expression") == null) {
+            return "{\"error\": \"缺少必填参数: expression，请提供数学表达式\"}";
+        }
+
+        String expression = (String) args.get("expression");
+        String expr = expression.replaceAll("\\s+", "");
+
+        // 安全检查
+        if (!expr.matches("[0-9+\\-*/().]+")) {
+            return "{\"error\": \"表达式包含非法字符，只允许数字和 + - * / ( )\"}";
+        }
+
+        // 除零检查
+        if (expr.contains("/0") && !expr.contains("/0.")) {
+            return "{\"error\": \"除零错误：表达式中包含除以零的操作\"}";
+        }
+
         try {
-            // 去掉所有空格
-            String expr = expression.replaceAll("\\s+", "");
-            // 只允许数字、运算符、括号、小数点
-            if (!expr.matches("[0-9+\\-*/().]+")) {
-                return "{\"error\": \"表达式包含非法字符\"}";
-            }
             double result = eval(expr);
-            // 整数就输出整数格式
+            if (Double.isNaN(result) || Double.isInfinite(result)) {
+                return "{\"error\": \"计算结果无效（NaN或无穷大），请检查表达式\"}";
+            }
             if (result == Math.floor(result) && !Double.isInfinite(result)) {
                 return "{\"result\": " + (long) result + "}";
             }
             return "{\"result\": " + result + "}";
         } catch (Exception e) {
-            return "{\"error\": \"计算失败: " + e.getMessage() + "\"}";
+            return "{\"error\": \"计算失败: " + e.getMessage() + "，请检查表达式格式\"}";
         }
     }
 
-    /**
-     * 递归下降解析四则运算
-     */
+    // ====== 工具3：读文件 ======
+    private String readFile(Map<String, Object> args) {
+        // 参数校验
+        if (!args.containsKey("path") || args.get("path") == null) {
+            return "{\"error\": \"缺少必填参数: path，请提供文件路径\"}";
+        }
+
+        String path = (String) args.get("path");
+        if (path.isEmpty()) {
+            return "{\"error\": \"文件路径不能为空\"}";
+        }
+
+        Path filePath = Path.of(path);
+        if (Files.isDirectory(filePath)) {
+            return "{\"error\": \"路径是一个目录，不是文件: " + path + "\"}";
+        }
+        if (!Files.exists(filePath)) {
+            return "{\"error\": \"文件不存在: " + path + "\"}";
+        }
+
+        try {
+            String content = Files.readString(filePath);
+            return "{\"content\": \""
+                    + content.replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("\n", "\\n")
+                    .replace("\t", "\\t")
+                    + "\"}";
+        } catch (IOException e) {
+            return "{\"error\": \"文件读取失败: " + e.getMessage() + "\"}";
+        }
+    }
+
+    // ====== 递归下降计算器（不变） ======
     private double eval(String expr) {
         return new Object() {
             int pos = -1;
@@ -120,14 +165,5 @@ public class ToolExecutor {
                 return x;
             }
         }.parse();
-    }
-
-    private String readFile(String path) {
-        try {
-            String content = Files.readString(Path.of(path));
-            return "{\"content\": \"" + content.replace("\"", "\\\"").replace("\n", "\\n") + "\"}";
-        } catch (IOException e) {
-            return "{\"error\": \"文件读取失败: " + e.getMessage() + "\"}";
-        }
     }
 }

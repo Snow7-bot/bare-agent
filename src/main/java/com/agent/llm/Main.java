@@ -16,7 +16,7 @@ public class Main {
     private static int totalCompletionTokens = 0;
     private static int roundCount = 0;
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) throws IOException, InterruptedException, LlmException {
         System.out.println("正在连接 DeepSeek...");
         LlmClient client = new LlmClient();
         Scanner sc = new Scanner(System.in);
