@@ -59,8 +59,7 @@ public class Main {
 
         // 创建执行器和 ReAct 循环
         ToolExecutor executor = new ToolExecutor();
-        ReActLoop reActLoop = new ReActLoop(client, registry, executor, 10);
-
+        ReActLoop reActLoop = new ReActLoop(client, registry, executor, 10, 128000, 0.8);
         System.out.println("连接成功！已注册 " + registry.size() + " 个工具。");
         System.out.println("试试问：\"现在几点了？\" 或 \"先查当前时间，然后告诉我 2026 年元旦还有多少天\"\n");
 
