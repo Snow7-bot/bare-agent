@@ -1,0 +1,19 @@
+Java Agent 最新信息速递
+=======================
+搜索时间：2025年
+
+1. Java Agent 框架 LangGraph 发布新版本
+   - LangGraph 作为热门的 Agent 编排框架，近期发布了新版本，
+     在 Java 生态中的集成更加完善。
+
+2. Spring AI 正式支持 MCP 协议
+   - Spring AI 宣布正式支持 MCP（Model Context Protocol）协议，
+     使得 Java 开发者可以更便捷地构建与外部工具和数据源交互的 AI Agent。
+
+3. 企业级 Agent 开发成为 2026 年技术趋势
+   - 随着各大云厂商和开源社区的投入，企业级 Java Agent 开发被
+     预测为 2026 年的重要技术趋势，越来越多的企业开始在
+     Java 技术栈上构建智能 Agent 应用。
+
+---
+以上信息由网络搜索整理，仅供参考。

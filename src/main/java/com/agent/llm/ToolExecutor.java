@@ -24,6 +24,9 @@ public class ToolExecutor {
                 case "get_current_time" -> getCurrentTime();
                 case "calculate" -> calculate(args);
                 case "read_file" -> readFile(args);
+                case "web_search" -> webSearch((String) args.getOrDefault("query", ""));
+                case "save_to_file" -> saveToFile(args);
+                case "list_files" -> listFiles((String) args.getOrDefault("path", "."));
                 default -> "{\"error\": \"未知工具: " + toolName
                         + "，请检查可用工具列表后重试\"}";
             };
@@ -165,5 +168,63 @@ public class ToolExecutor {
                 return x;
             }
         }.parse();
+    }
+    // ====== 工具4：模拟网络搜索 ======
+    private String webSearch(String query) {
+        if (query == null || query.isEmpty()) {
+            return "{\"error\": \"缺少必填参数: query\"}";
+        }
+        // 模拟搜索结果（实际项目可接真实搜索 API）
+        String result = String.format(
+                "搜索结果: 关于\"%s\"的最新信息...\n" +
+                        "1. Java Agent 框架 LangGraph 发布新版本\n" +
+                        "2. Spring AI 正式支持 MCP 协议\n" +
+                        "3. 企业级 Agent 开发成为 2026 年技术趋势",
+                query
+        );
+        return "{\"result\": \"" + result.replace("\"", "\\\"").replace("\n", "\\n") + "\"}";
+    }
+
+    // ====== 工具5：保存内容到文件 ======
+    private String saveToFile(Map<String, Object> args) {
+        if (!args.containsKey("path")) {
+            return "{\"error\": \"缺少必填参数: path\"}";
+        }
+        if (!args.containsKey("content")) {
+            return "{\"error\": \"缺少必填参数: content\"}";
+        }
+        String path = (String) args.get("path");
+        String content = (String) args.get("content");
+        if (path.isEmpty()) {
+            return "{\"error\": \"文件路径不能为空\"}";
+        }
+        try {
+            Files.writeString(Path.of(path), content);
+            return "{\"success\": true, \"path\": \"" + path + "\", \"size\": " + content.length() + "}";
+        } catch (IOException e) {
+            return "{\"error\": \"文件写入失败: " + e.getMessage() + "\"}";
+        }
+    }
+
+    // ====== 工具6：列出目录文件 ======
+    private String listFiles(String path) {
+        try {
+            Path dir = Path.of(path);
+            if (!Files.exists(dir)) {
+                return "{\"error\": \"目录不存在: " + path + "\"}";
+            }
+            if (!Files.isDirectory(dir)) {
+                return "{\"error\": \"路径不是目录: " + path + "\"}";
+            }
+            StringBuilder sb = new StringBuilder("[");
+            Files.list(dir).forEach(p -> {
+                if (sb.length() > 1) sb.append(", ");
+                sb.append("\"").append(p.getFileName()).append("\"");
+            });
+            sb.append("]");
+            return "{\"files\": " + sb.toString() + "}";
+        } catch (IOException e) {
+            return "{\"error\": \"目录读取失败: " + e.getMessage() + "\"}";
+        }
     }
 }

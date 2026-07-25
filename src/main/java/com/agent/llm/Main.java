@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
-import java.io.IOException;
 
 public class Main {
     private static final String LOG_FILE = "src/main/resources/logs/usage.log";
@@ -57,12 +56,58 @@ public class Main {
                         "required", List.of("path")
                 )
         ));
+        registry.register(new ToolDefinition(
+                "web_search",
+                "搜索互联网信息（模拟），返回相关结果",
+                Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "query", Map.of(
+                                        "type", "string",
+                                        "description", "搜索关键词"
+                                )
+                        ),
+                        "required", List.of("query")
+                )
+        ));
+        registry.register(new ToolDefinition(
+                "save_to_file",
+                "将内容保存到指定文件",
+                Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "path", Map.of(
+                                        "type", "string",
+                                        "description", "文件路径"
+                                ),
+                                "content", Map.of(
+                                        "type", "string",
+                                        "description", "要保存的内容"
+                                )
+                        ),
+                        "required", List.of("path", "content")
+                )
+        ));
+        registry.register(new ToolDefinition(
+                "list_files",
+                "列出指定目录下的文件",
+                Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "path", Map.of(
+                                        "type", "string",
+                                        "description", "目录路径，默认为当前目录"
+                                )
+                        ),
+                        "required", List.of()
+                )
+        ));
 
         // 创建执行器和 ReAct 循环
         ToolExecutor executor = new ToolExecutor();
         ReActLoop reActLoop = new ReActLoop(client, registry, executor, 10, 128000, 0.8);
         System.out.println("连接成功！已注册 " + registry.size() + " 个工具。");
-        System.out.println("试试问：\"现在几点了？\" 或 \"先查当前时间，然后告诉我 2026 年元旦还有多少天\"\n");
+        System.out.println("试试问：\"现在几点了？\" 或 \"帮我在网上搜索 Java Agent 的最新信息，然后保存到 agent-news.txt\"\n");
 
         // 初始化日志
         initLog();
@@ -89,7 +134,7 @@ public class Main {
             ChatResponse response = client.chatWithTools(history, registry.getAllDefinitions());
 
             if (response.hasToolCalls()) {
-                // 有工具调用 → 走 ReAct 循环（非流式）
+                // 有工具调用 → 写 assistant 消息 + 执行工具
                 List<ToolCall> toolCalls = response.getToolCalls();
                 Message assistantMsg = response.getChoices().get(0).getMessage();
                 history.add(assistantMsg);
@@ -103,25 +148,49 @@ public class Main {
                     history.add(new Message("tool", result, tc.getId()));
                 }
 
-                // 工具执行完后，用流式输出最终回答
-                System.out.print("DeepSeek: ");
-                client.chatStream(history, registry.getAllDefinitions(), new StreamCallback() {
-                    @Override
-                    public void onToken(String token) {
-                        System.out.print(token);
+                // 继续循环，直到 LLM 不再需要工具
+                while (true) {
+                    ChatResponse toolResponse = client.chatWithTools(history, registry.getAllDefinitions());
+                    if (toolResponse.hasToolCalls()) {
+                        List<ToolCall> moreToolCalls = toolResponse.getToolCalls();
+                        Message moreAssistantMsg = toolResponse.getChoices().get(0).getMessage();
+                        history.add(moreAssistantMsg);
+
+                        for (ToolCall tc : moreToolCalls) {
+                            String toolName = tc.getFunction().getName();
+                            String arguments = tc.getFunction().getArguments();
+                            System.out.println("🔧 执行: " + toolName + "(" + arguments + ")");
+                            String result = executor.execute(toolName, arguments);
+                            System.out.println("   结果: " + result);
+                            history.add(new Message("tool", result, tc.getId()));
+                        }
+                    } else {
+                        // 没有工具了，流式输出最终回答
+                        System.out.print("DeepSeek: ");
+                        try {
+                            client.chatStream(history, registry.getAllDefinitions(), new StreamCallback() {
+                                @Override
+                                public void onToken(String token) {
+                                    System.out.print(token);
+                                }
+                                @Override
+                                public void onComplete(String fullContent) {
+                                    System.out.println();
+                                    history.add(new Message("assistant", fullContent));
+                                }
+                                @Override
+                                public void onError(Throwable error) {
+                                    System.err.println("\n流式错误: " + error.getMessage());
+                                }
+                            });
+                        } catch (Exception e) {
+                            System.err.println("流式调用失败: " + e.getMessage());
+                        }
+                        break;
                     }
-                    @Override
-                    public void onComplete(String fullContent) {
-                        System.out.println();
-                        history.add(new Message("assistant", fullContent));
-                    }
-                    @Override
-                    public void onError(Throwable error) {
-                        System.err.println("\n流式错误: " + error.getMessage());
-                    }
-                });
+                }
             } else {
-                // 无工具调用 → 流式输出普通回复
+                // 无工具调用 → 直接输出普通回复
                 String reply = response.getFirstContent();
                 history.add(new Message("assistant", reply));
                 System.out.println("DeepSeek: " + reply);
@@ -130,6 +199,7 @@ public class Main {
             roundCount++;
             System.out.println("  [第 " + roundCount + " 轮]");
         }
+
         // 打印汇总
         int total = totalPromptTokens + totalCompletionTokens;
         System.out.println("\n========== 会话汇总 ==========");
