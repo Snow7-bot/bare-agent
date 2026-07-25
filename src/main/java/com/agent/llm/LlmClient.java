@@ -1,6 +1,8 @@
 package com.agent.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 import java.io.IOException;
 import java.net.URI;
@@ -75,6 +77,7 @@ public class LlmClient {
         }
     }
 
+
     /**
      * 真正发请求
      */
@@ -106,6 +109,118 @@ public class LlmClient {
         }
 
         return objectMapper.readValue(response.body(), ChatResponse.class);
+    }
+    /**
+     * 流式对话：每收到一个 token 就回调 onToken，最后回调 onComplete
+     */
+    public void chatStream(List<Message> messages, List<ToolDefinition> tools,
+                           StreamCallback callback) {
+
+        retryPolicy.reset();
+
+        while (true) {
+            try {
+                doChatStream(messages, tools, callback);
+                return;
+            } catch (IOException e) {
+                String msg = e.getMessage();
+                int statusCode = extractStatusCode(msg);
+
+                if (statusCode == 401) {
+                    callback.onError(new LlmException("API Key 无效", 401));
+                    return;
+                }
+
+                if (statusCode == 429 || statusCode == 503) {
+                    if (retryPolicy.canRetry()) {
+                        try {
+                            retryPolicy.waitAndLog(msg, statusCode);
+                        } catch (LlmException ex) {
+                            callback.onError(ex);
+                            return;
+                        }
+                        continue;
+                    }
+                }
+
+                callback.onError(new LlmException("流式调用失败: " + msg, statusCode));
+                return;
+            }
+        }
+    }
+
+    /**
+     * 真正执行流式请求
+     */
+    private void doChatStream(List<Message> messages, List<ToolDefinition> tools,
+                              StreamCallback callback) throws IOException {
+
+        ChatRequest request = new ChatRequest(model, messages);
+        request.setTemperature(0.7);
+        request.setStream(true);          // ★ 开启流式
+        if (tools != null && !tools.isEmpty()) {
+            request.setTools(tools);
+        }
+
+        String requestBody = objectMapper.writeValueAsString(request);
+
+        HttpRequest httpRequest = HttpRequest.newBuilder()
+                .uri(URI.create(apiUrl))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .timeout(Duration.ofSeconds(120))
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<java.io.InputStream> response = null;
+        try {
+            response = httpClient.send(httpRequest,
+                    HttpResponse.BodyHandlers.ofInputStream());
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        int statusCode = response.statusCode();
+        if (statusCode != 200) {
+            String errorBody = new String(response.body().readAllBytes());
+            throw new IOException("HTTP " + statusCode + ": " + errorBody);
+        }
+
+        // 逐行读取 SSE 事件流
+        BufferedReader reader = new BufferedReader(
+                new InputStreamReader(response.body()));
+        String line;
+        StringBuilder fullContent = new StringBuilder();
+
+        while ((line = reader.readLine()) != null) {
+            if (line.startsWith("data: ")) {
+                String data = line.substring(6).trim();
+                if ("[DONE]".equals(data)) {
+                    break;
+                }
+                try {
+                    ChatResponse chunk = objectMapper.readValue(data, ChatResponse.class);
+                    if (chunk.getChoices() != null && !chunk.getChoices().isEmpty()) {
+                        ChatResponse.Choice choice = chunk.getChoices().get(0);
+                        Message delta = choice.getDelta();
+                        if (delta == null) {
+                            delta = choice.getMessage();
+                        }
+                        if (delta != null && delta.getContent() != null) {
+                            String token = delta.getContent();
+                            fullContent.append(token);
+                            callback.onToken(token);
+                        }
+                    }
+                } catch (Exception e) {
+                    // 个别 chunk 解析失败不影响整体
+                    System.err.println("SSE 解析失败: " + e.getMessage());
+                }
+            }
+        }
+
+        callback.onComplete(fullContent.toString());
     }
 
     /**

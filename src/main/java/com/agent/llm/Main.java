@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
+import java.io.IOException;
 
 public class Main {
     private static final String LOG_FILE = "src/main/resources/logs/usage.log";
@@ -84,18 +85,51 @@ public class Main {
 
             history.add(new Message("user", userInput));
 
-            // 使用 ReAct 循环处理
-            String finalReply = reActLoop.run(history);
-            history.add(new Message("assistant", finalReply));
+            // 先用非流式判断是否有 tool_calls
+            ChatResponse response = client.chatWithTools(history, registry.getAllDefinitions());
 
-            System.out.println("DeepSeek: " + finalReply);
+            if (response.hasToolCalls()) {
+                // 有工具调用 → 走 ReAct 循环（非流式）
+                List<ToolCall> toolCalls = response.getToolCalls();
+                Message assistantMsg = response.getChoices().get(0).getMessage();
+                history.add(assistantMsg);
 
-            // 统计
+                for (ToolCall tc : toolCalls) {
+                    String toolName = tc.getFunction().getName();
+                    String arguments = tc.getFunction().getArguments();
+                    System.out.println("🔧 执行: " + toolName + "(" + arguments + ")");
+                    String result = executor.execute(toolName, arguments);
+                    System.out.println("   结果: " + result);
+                    history.add(new Message("tool", result, tc.getId()));
+                }
+
+                // 工具执行完后，用流式输出最终回答
+                System.out.print("DeepSeek: ");
+                client.chatStream(history, registry.getAllDefinitions(), new StreamCallback() {
+                    @Override
+                    public void onToken(String token) {
+                        System.out.print(token);
+                    }
+                    @Override
+                    public void onComplete(String fullContent) {
+                        System.out.println();
+                        history.add(new Message("assistant", fullContent));
+                    }
+                    @Override
+                    public void onError(Throwable error) {
+                        System.err.println("\n流式错误: " + error.getMessage());
+                    }
+                });
+            } else {
+                // 无工具调用 → 流式输出普通回复
+                String reply = response.getFirstContent();
+                history.add(new Message("assistant", reply));
+                System.out.println("DeepSeek: " + reply);
+            }
+
             roundCount++;
-            System.out.println("  [ReAct 循环 " + reActLoop.getIterationCount()
-                    + " 轮，状态: " + reActLoop.getState() + "]");
+            System.out.println("  [第 " + roundCount + " 轮]");
         }
-
         // 打印汇总
         int total = totalPromptTokens + totalCompletionTokens;
         System.out.println("\n========== 会话汇总 ==========");

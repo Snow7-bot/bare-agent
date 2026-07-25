@@ -58,6 +58,11 @@ public class ChatResponse {
     public static class Choice {
         private Message message;
         private String finishReason;
+        @JsonProperty("delta")
+        private Message delta;
+
+        public Message getDelta() { return delta; }
+        public void setDelta(Message delta) { this.delta = delta; }
 
         public Choice() {}
 

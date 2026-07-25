@@ -9,6 +9,10 @@ public class ChatRequest {
     private List<Message> messages;
     private Double temperature;
     private List<ToolDefinition> tools;
+    private Boolean stream;
+
+    public Boolean getStream() { return stream; }
+    public void setStream(Boolean stream) { this.stream = stream; }
 
     // 无参构造
     public ChatRequest() {}
