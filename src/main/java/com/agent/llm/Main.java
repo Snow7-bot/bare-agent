@@ -10,7 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 
+
 public class Main {
+    public static void main(String[] args) throws Exception {
+        new ConsoleAgent().start();
+    }
+}
+/*public class Main {
     private static final String LOG_FILE = "src/main/resources/logs/usage.log";
     private static int totalPromptTokens = 0;
     private static int totalCompletionTokens = 0;
@@ -220,3 +226,5 @@ public class Main {
         }
     }
 }
+
+ */
