@@ -130,11 +130,9 @@ public class Main {
 
             history.add(new Message("user", userInput));
 
-            // 先用非流式判断是否有 tool_calls
             ChatResponse response = client.chatWithTools(history, registry.getAllDefinitions());
 
             if (response.hasToolCalls()) {
-                // 有工具调用 → 写 assistant 消息 + 执行工具
                 List<ToolCall> toolCalls = response.getToolCalls();
                 Message assistantMsg = response.getChoices().get(0).getMessage();
                 history.add(assistantMsg);
@@ -148,7 +146,6 @@ public class Main {
                     history.add(new Message("tool", result, tc.getId()));
                 }
 
-                // 继续循环，直到 LLM 不再需要工具
                 while (true) {
                     ChatResponse toolResponse = client.chatWithTools(history, registry.getAllDefinitions());
                     if (toolResponse.hasToolCalls()) {
@@ -165,7 +162,6 @@ public class Main {
                             history.add(new Message("tool", result, tc.getId()));
                         }
                     } else {
-                        // 没有工具了，流式输出最终回答
                         System.out.print("DeepSeek: ");
                         try {
                             client.chatStream(history, registry.getAllDefinitions(), new StreamCallback() {
@@ -190,7 +186,6 @@ public class Main {
                     }
                 }
             } else {
-                // 无工具调用 → 直接输出普通回复
                 String reply = response.getFirstContent();
                 history.add(new Message("assistant", reply));
                 System.out.println("DeepSeek: " + reply);
@@ -200,7 +195,6 @@ public class Main {
             System.out.println("  [第 " + roundCount + " 轮]");
         }
 
-        // 打印汇总
         int total = totalPromptTokens + totalCompletionTokens;
         System.out.println("\n========== 会话汇总 ==========");
         System.out.println("总轮次: " + roundCount);
@@ -208,8 +202,6 @@ public class Main {
 
         sc.close();
     }
-
-    // ========== 日志方法 ==========
 
     private static void initLog() throws IOException {
         try (PrintWriter pw = new PrintWriter(new FileWriter(LOG_FILE, true))) {
